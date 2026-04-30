@@ -264,8 +264,13 @@ function fmtRaw(v){
 function toDateStr(v){
   if(!v) return null;
   if(v instanceof Date) return v.toISOString().substring(0,10);
-  if(typeof v==='string') return v.substring(0,10);
-  return null;
+  const s = String(v).trim();
+  if(s.match(/^\d{4}-\d{2}-\d{2}/)) return s.substring(0,10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m){ const mo=m[1].padStart(2,"0"), d=m[2].padStart(2,"0"), y=m[3].length===2?"20"+m[3]:m[3]; return `${y}-${mo}-${d}`; }
+  const m2 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if(m2) return `${m2[3]}-${m2[2]}-${m2[1]}`;
+  return s.substring(0,10);
 }
 function setMsg(html){ document.getElementById('msgArea').innerHTML = html; }
 function readAB(f){ return new Promise((r,j)=>{ const rd=new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>j(new Error('Błąd odczytu')); rd.readAsArrayBuffer(f); }); }
