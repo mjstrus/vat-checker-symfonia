@@ -91,6 +91,13 @@
     .filter-bar input { border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 12px; font-size: 13px; outline: none; flex: 1; min-width: 180px; }
     .filter-bar input:focus { border-color: #3b82f6; }
 
+    /* REGISTER TYPE SELECTOR */
+    .reg-type-selector { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; }
+    .reg-type-label { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; display: block; }
+    .reg-type-select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 12px; font-size: 13px; outline: none; min-width: 220px; cursor: pointer; background: #fff; color: #0f172a; font-weight: 600; }
+    .reg-type-select:focus { border-color: #0f3460; box-shadow: 0 0 0 3px rgba(15,52,96,.1); }
+    .reg-type-hint { font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic; }
+
     .tbl-wrap { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 14px; }
     .tbl-scroll { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -191,6 +198,16 @@
       </div>
     </div>
 
+    <div class="reg-type-selector">
+      <label class="reg-type-label">Typ rejestru</label>
+      <select id="regType" class="reg-type-select">
+        <option value="auto">🔍 Auto-detekcja</option>
+        <option value="zakup">📥 Zakup (naliczony VAT)</option>
+        <option value="sprzedaz">📤 Sprzedaż (należny VAT)</option>
+      </select>
+      <div class="reg-type-hint" id="regTypeHint"></div>
+    </div>
+
     <button class="btn-primary" id="btnAnalyze" disabled onclick="runAnalysis()">
       🔍 Analizuj i porównaj
     </button>
@@ -245,7 +262,14 @@ function renderXmlZone(){
   const more  = xmlFiles.length>5 ? `<span class="chip">+${xmlFiles.length-5}</span>` : '';
   document.getElementById('xmlContent').innerHTML = `<div class="dz-icon">📂</div><div class="dz-name">${xmlFiles.length} plik(ów) XML</div><div style="margin-top:6px">${chips}${more}</div><button class="btn-clear" onclick="event.preventDefault();clearXml()">Wyczyść</button>`;
 }
-function checkReady(){ document.getElementById('btnAnalyze').disabled = !(xlsxFile && xmlFiles.length); }
+function checkReady(){ 
+  document.getElementById('btnAnalyze').disabled = !(xlsxFile && xmlFiles.length); 
+  // Show detected type hint
+  if(xlsxFile && document.getElementById('regType').value === 'auto') {
+    const hint = document.getElementById('regTypeHint');
+    hint.innerHTML = '⏳ Typ będzie automatycznie wykryty z pliku...';
+  }
+}
 
 // ═══════════════════════════════════════════════════
 // HELPERS
@@ -303,10 +327,11 @@ function parseSymfoniaXlsx(arrayBuffer){
   // Wiersz 0 = nagłówki
   const headers = rows[0];
 
-  // Wykryj typ rejestru i firmę z danych
-  let typRejestru = null, firma = null, nip = null, okres = null;
+  // Typ rejestru — użytkownik wybiera lub auto-detekcja
+  let typRejestru = document.getElementById('regType').value;
+  let autoDetected = null;
+  let firma = null, nip = null, okres = null;
 
-  // Wykryj z kolumny "Nazwa rejestru" (kol. 26) lub "Skrót dok." (kol. 10)
   const entries = [];
 
   for(let i=1; i<rows.length; i++){
@@ -338,12 +363,12 @@ function parseSymfoniaXlsx(arrayBuffer){
     const nazwaRej= r[26] ? String(r[26]).trim() : null;
     const dataWpl = toDateStr(r[23]);
 
-    // Wykryj typ rejestru z pierwszego wiersza
-    if(!typRejestru && nazwaRej){
+    // Auto-detekcja z pierwszego wiersza (dla sugestii)
+    if(!autoDetected && nazwaRej){
       if(nazwaRej.toLowerCase().includes('zakup') || skrot?.startsWith('FVZ') || skrot?.startsWith('IU'))
-        typRejestru = 'zakup';
+        autoDetected = 'zakup';
       else if(nazwaRej.toLowerCase().includes('sprzedaż') || skrot?.startsWith('FVS'))
-        typRejestru = 'sprzedaz';
+        autoDetected = 'sprzedaz';
     }
     if(!okres && r[3]) okres = String(r[3]).trim();
 
@@ -396,6 +421,7 @@ function parseJpkFaXml(xmlText, fileName){
         dataWyst:   getVal(f,'P_1'),
         dataSprz:   getVal(f,'P_6') || getVal(f,'P_1'),
         nipSprzed:  getVal(f,'P_4B'),
+        nipNabywcy: getVal(f,'P_5B'),
         kontrahent: getVal(f,'P_3C'),
         adresSprz:  getVal(f,'P_3D'),
         netto:netto||null, vat:vat||null, brutto:brutto||null,
@@ -420,16 +446,20 @@ function compare(symEntries, jpkDocs){
       results.push({ jpk, sym:null, status:'xml_error', issues:[`Błąd XML: ${jpk.error}`] });
       return;
     }
-    // Dopasowanie: najpierw numer + NIP sprzedawcy, fallback tylko po numerze
+    // Dopasowanie: numer faktury + NIP kontrahenta
+    // Rejestr zakupu: e.nip = NIP sprzedawcy, jpk.nipSprzed = P_4B (NIP wystawcy)
+    // Rejestr sprzedaży: e.nip = NIP nabywcy, jpk.nipNabywcy = P_5B (NIP nabywcy)
     let match = symEntries.find(e =>
-      e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) &&
-      e.nip && jpk.nipSprzed && norm(e.nip) === norm(jpk.nipSprzed)
+      e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) && (
+        (e.nip && jpk.nipSprzed  && norm(e.nip) === norm(jpk.nipSprzed))  ||
+        (e.nip && jpk.nipNabywcy && norm(e.nip) === norm(jpk.nipNabywcy))
+      )
     );
     // Fallback: tylko numer (gdy NIP niedostępny w jednym ze źródeł)
     if(!match) {
       match = symEntries.find(e =>
         e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) &&
-        (!e.nip || !jpk.nipSprzed)
+        (!e.nip || (!jpk.nipSprzed && !jpk.nipNabywcy))
       );
     }
     if(!match){
@@ -454,19 +484,23 @@ function compare(symEntries, jpkDocs){
     if(symData && jpkData && symData!==jpkData)
       issues.push(`Data dokumentu: Symfonia ${match.dataDok} ≠ JPK ${jpk.dataWyst}`);
 
-    // NIP
-    if(match.nip && jpk.nipSprzed && norm(match.nip)!==norm(jpk.nipSprzed))
-      issues.push(`NIP sprzedawcy: Symfonia ${match.nip} ≠ JPK ${jpk.nipSprzed}`);
+    // NIP — dopasuj właściwy w zależności od typu rejestru
+    const jpkNipKontrahenta = jpk.nipNabywcy || jpk.nipSprzed;
+    if(match.nip && jpkNipKontrahenta && norm(match.nip)!==norm(jpkNipKontrahenta))
+      issues.push(`NIP kontrahenta: Symfonia ${match.nip} ≠ JPK ${jpkNipKontrahenta}`);
 
     results.push({ jpk, sym:match, status:issues.length?'mismatch':'ok', issues });
   });
 
   // Pozycje w Symfonii bez JPK
   symEntries.forEach(e=>{
-    // Dopasowanie z NIP gdy dostępny
+    // Dopasowanie z NIP gdy dostępny (obsługa zakupu i sprzedaży)
     const found = jpkDocs.find(k=>
-      k.nrFaktury && e.nrDok && norm(e.nrDok)===norm(k.nrFaktury) &&
-      ((!e.nip || !k.nipSprzed) || norm(e.nip)===norm(k.nipSprzed))
+      k.nrFaktury && e.nrDok && norm(e.nrDok)===norm(k.nrFaktury) && (
+        !e.nip || (!k.nipSprzed && !k.nipNabywcy) ||
+        (k.nipSprzed  && norm(e.nip)===norm(k.nipSprzed))  ||
+        (k.nipNabywcy && norm(e.nip)===norm(k.nipNabywcy))
+      )
     );
     if(!found){
       const bfkInfo = e.isBfk ? ' (BFK — brak obowiązku KSeF)' : '';
@@ -744,6 +778,12 @@ async function runAnalysis(){
     const ab=await readAB(xlsxFile);
     const register=parseSymfoniaXlsx(ab);
     if(!register.entries.length) throw new Error('Nie znaleziono pozycji w pliku XLSX. Sprawdź czy to prawidłowy eksport z Symfonii FK.');
+    
+    // Jeśli user wybrał auto, wymuszenie użycia detected type
+    const userType = document.getElementById('regType').value;
+    if(userType === 'auto' && register.typRejestru) {
+      document.getElementById('regType').value = register.typRejestru;
+    }
 
     setMsg('<div class="msg-info"><div class="spinner"></div>Parsowanie plików JPK_FA (XML)...</div>');
     const jpkNested=await Promise.all(xmlFiles.map(async f=>parseJpkFaXml(await readTxt(f),f.name)));
