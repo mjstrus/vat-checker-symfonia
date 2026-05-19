@@ -341,8 +341,9 @@ function parseSymfoniaXlsx(arrayBuffer){
     const nrDok   = r[11] ? String(r[11]).trim() : null;
     const nrEwid  = r[9]  ? String(r[9]).trim()  : null;
     const skrot   = r[10] ? String(r[10]).trim()  : null;
-    const dataDok = toDateStr(r[5]);
-    const dataOp  = toDateStr(r[6]);
+    const dataDok = toDateStr(r[5]);  // Data dokumentu (wysłania do KSeF)
+    const dataOp  = toDateStr(r[6]);  // Data operacji gosp. (faktyczna data faktury)
+    const dataSprz = typRejestru === 'sprzedaz' ? dataOp : dataDok;  // Właściwa data do porównania
     const dataKsef= toDateStr(r[7]);
     const nrKsef  = r[8]  ? String(r[8]).trim()  : null;
     const parseAmt = v => {
@@ -375,7 +376,7 @@ function parseSymfoniaXlsx(arrayBuffer){
     const isBfk = jpkDok?.includes('BFK') || (!nrKsef && !dataKsef);
 
     entries.push({
-      nrDok, nrEwid, skrot, dataDok, dataOp, dataKsef, nrKsef,
+      nrDok, nrEwid, skrot, dataDok, dataOp, dataSprz, dataKsef, nrKsef,
       netto, vat, brutto, kontrahent: kontrah, nip: nipKtr,
       stawka, abcd, jpkDok, nazwaRej, dataWpl,
       isBfk: isBfk && !nrKsef,
@@ -477,12 +478,12 @@ function compare(symEntries, jpkDocs){
     if(match.brutto!=null && jpk.brutto && Math.abs(match.brutto-jpk.brutto)>TOL)
       issues.push(`Brutto: Symfonia ${fmtRaw(match.brutto)} ≠ JPK ${fmtRaw(jpk.brutto)}`);
 
-    // Daty
+    // Daty — użyj dataSprz zamiast dataDok
     const normD = s => { if(!s) return null; const m=String(s).match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return m?`${m[3]}-${m[2]}-${m[1]}`:String(s).substring(0,10); };
-    const symData = normD(match.dataDok);
+    const symData = normD(match.dataSprz || match.dataDok);
     const jpkData = normD(jpk.dataWyst);
     if(symData && jpkData && symData!==jpkData)
-      issues.push(`Data dokumentu: Symfonia ${match.dataDok} ≠ JPK ${jpk.dataWyst}`);
+      issues.push(`Data dokumentu: Symfonia ${match.dataSprz || match.dataDok} ≠ JPK ${jpk.dataWyst}`);
 
     // NIP — dopasuj właściwy w zależności od typu rejestru
     const jpkNipKontrahenta = jpk.nipNabywcy || jpk.nipSprzed;
