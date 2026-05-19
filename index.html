@@ -287,16 +287,20 @@ function fmtRaw(v){
 }
 function toDateStr(v){
   if(!v && v !== 0) return null;
-  // Liczba seryjna Excela (raw:true) — konwersja na datę
-  if(typeof v === 'number' && v > 1000){
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return d.toISOString().substring(0,10);
-  }
-  if(v instanceof Date) return v.toISOString().substring(0,10);
+  // raw:false XLSX.js konwertuje na stringi dat takie jak "4/7/26" lub "4/30/2026"
   const s = String(v).trim();
+  if(!s) return null;
+  // YYYY-MM-DD
   if(s.match(/^\d{4}-\d{2}-\d{2}/)) return s.substring(0,10);
+  // M/D/YY lub MM/DD/YYYY (XLSX.js format z raw:false)
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if(m){ const mo=m[1].padStart(2,"0"), d=m[2].padStart(2,"0"), y=m[3].length===2?"20"+m[3]:m[3]; return `${y}-${mo}-${d}`; }
+  if(m){
+    const month = m[1].padStart(2,'0');
+    const day   = m[2].padStart(2,'0');
+    const year  = m[3].length === 2 ? '20' + m[3] : m[3];
+    return `${year}-${month}-${day}`;
+  }
+  // DD.MM.YYYY
   const m2 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if(m2) return `${m2[3]}-${m2[2]}-${m2[1]}`;
   return s.substring(0,10);
@@ -320,7 +324,7 @@ function readTxt(f){ return new Promise((r,j)=>{ const rd=new FileReader(); rd.o
 function parseSymfoniaXlsx(arrayBuffer){
   const wb = XLSX.read(arrayBuffer, { type:'array', cellDates:true });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
 
   if(!rows.length) throw new Error('Plik XLSX jest pusty');
 
@@ -344,7 +348,7 @@ function parseSymfoniaXlsx(arrayBuffer){
     const dataDok = toDateStr(r[5]);  // Data dokumentu (wysłania do KSeF)
     const dataOp  = toDateStr(r[6]);  // Data operacji gosp. (faktyczna data faktury)
     const dataSprz = typRejestru === 'sprzedaz' ? dataOp : dataDok;  // Właściwa data do porównania
-    if(i===2) alert('DEBUG wiersz 2:', {nrDok, dataDok: toDateStr(r[5]), dataOp: toDateStr(r[6]), dataSprz, typRejestru});
+    if(i===2) console.log('DEBUG wiersz 2:', {nrDok, dataDok: toDateStr(r[5]), dataOp: toDateStr(r[6]), dataSprz, typRejestru});
     const dataKsef= toDateStr(r[7]);
     const nrKsef  = r[8]  ? String(r[8]).trim()  : null;
     const parseAmt = v => {
@@ -371,7 +375,6 @@ function parseSymfoniaXlsx(arrayBuffer){
         autoDetected = 'zakup';
       else if(nazwaRej.toLowerCase().includes('sprzedaż') || skrot?.startsWith('FVS'))
         autoDetected = 'sprzedaz';
-      if(autoDetected) alert('DEBUG: autoDetected =', autoDetected, 'z nazwaRej =', nazwaRej);
     }
     if(!okres && r[3]) okres = String(r[3]).trim();
 
