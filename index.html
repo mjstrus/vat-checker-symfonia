@@ -408,11 +408,20 @@ function compare(symEntries, jpkDocs){
       results.push({ jpk, sym:null, status:'xml_error', issues:[`Błąd XML: ${jpk.error}`] });
       return;
     }
-    const match = symEntries.find(e =>
-      e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury)
+    // Dopasowanie: najpierw numer + NIP sprzedawcy, fallback tylko po numerze
+    let match = symEntries.find(e =>
+      e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) &&
+      e.nip && jpk.nipSprzed && norm(e.nip) === norm(jpk.nipSprzed)
     );
+    // Fallback: tylko numer (gdy NIP niedostępny w jednym ze źródeł)
+    if(!match) {
+      match = symEntries.find(e =>
+        e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) &&
+        (!e.nip || !jpk.nipSprzed)
+      );
+    }
     if(!match){
-      results.push({ jpk, sym:null, status:'not_found', issues:[`Faktura ${jpk.nrFaktury||'?'} nie znaleziona w rejestrze Symfonii`] });
+      results.push({ jpk, sym:null, status:'not_found', issues:[`Faktura ${jpk.nrFaktury||'?'} (NIP: ${jpk.nipSprzed||'?'}) nie znaleziona w rejestrze Symfonii`] });
       return;
     }
 
@@ -442,7 +451,11 @@ function compare(symEntries, jpkDocs){
 
   // Pozycje w Symfonii bez JPK
   symEntries.forEach(e=>{
-    const found = jpkDocs.find(k=>k.nrFaktury && e.nrDok && norm(e.nrDok)===norm(k.nrFaktury));
+    // Dopasowanie z NIP gdy dostępny
+    const found = jpkDocs.find(k=>
+      k.nrFaktury && e.nrDok && norm(e.nrDok)===norm(k.nrFaktury) &&
+      ((!e.nip || !k.nipSprzed) || norm(e.nip)===norm(k.nipSprzed))
+    );
     if(!found){
       const bfkInfo = e.isBfk ? ' (BFK — brak obowiązku KSeF)' : '';
       results.push({
