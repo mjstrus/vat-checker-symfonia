@@ -423,8 +423,8 @@ function parseJpkFaXml(xmlText, fileName){
       return {
         fileName,
         nrFaktury:  getVal(f,'P_2A'),
-        dataWyst:   getVal(f,'P_1'),
-        dataSprz:   getVal(f,'P_6') || getVal(f,'P_1'),
+        dataWyst:   getVal(f,'P_1'),  // Data wystawienia (może być inna dla sprzedaży)
+        dataSprz:   getVal(f,'P_6'),  // Data sprzedaży/dostawy — użyj tego dla porównania
         nipSprzed:  getVal(f,'P_4B'),
         nipNabywcy: getVal(f,'P_5B'),
         kontrahent: getVal(f,'P_3C'),
@@ -485,7 +485,7 @@ function compare(symEntries, jpkDocs){
     // Daty — użyj dataSprz zamiast dataDok
     const normD = s => { if(!s) return null; const m=String(s).match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return m?`${m[3]}-${m[2]}-${m[1]}`:String(s).substring(0,10); };
     const symData = normD(match.dataSprz || match.dataDok);
-    const jpkData = normD(jpk.dataWyst);
+    const jpkData = normD(jpk.dataSprz || jpk.dataWyst);  // Preferuj P_6 dla sprzedaży
     if(symData && jpkData && symData!==jpkData)
       issues.push(`Data dokumentu: Symfonia ${match.dataSprz || match.dataDok} ≠ JPK ${jpk.dataWyst}`);
 
