@@ -569,7 +569,7 @@ function buildTbody(results){
       <td style="font-weight:600">${nr} ${ksefBadge}</td>
       <td style="color:#64748b;font-size:11.5px">${nrEwid}</td>
       <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${kontrahent}">${kontrahent}</td>
-      <td>${cellCmp(r.sym?.dataDok, r.jpk?.dataWyst)}</td>
+      <td>${cellCmp(r.sym?.dataSprz || r.sym?.dataDok, r.jpk?.dataWyst)}</td>
       <td>${esc(r.jpk?.dataSprz||'—')}</td>
       <td>${fmt(r.sym?.netto)}</td>
       <td>${fmt(r.jpk?.netto)}</td>
