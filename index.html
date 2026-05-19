@@ -348,7 +348,6 @@ function parseSymfoniaXlsx(arrayBuffer){
     const dataDok = toDateStr(r[5]);  // Data dokumentu (wysłania do KSeF)
     const dataOp  = toDateStr(r[6]);  // Data operacji gosp. (faktyczna data faktury)
     const dataSprz = typRejestru === 'sprzedaz' ? dataOp : dataDok;  // Właściwa data do porównania
-    if(i===2) console.log('DEBUG wiersz 2:', {nrDok, dataDok: toDateStr(r[5]), dataOp: toDateStr(r[6]), dataSprz, typRejestru});
     const dataKsef= toDateStr(r[7]);
     const nrKsef  = r[8]  ? String(r[8]).trim()  : null;
     const parseAmt = v => {
