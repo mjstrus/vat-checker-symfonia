@@ -799,7 +799,7 @@ async function runAnalysis(){
     const jpkDocs=jpkNested.flat();
 
     setMsg('<div class="msg-info"><div class="spinner"></div>Porównuję dokumenty...</div>');
-    const results=compare(register.entries,jpkDocs);
+    const results=compare(register.entries,jpkDocs,typRejestru);
 
     setMsg('');
     renderResults(register,jpkDocs,results);
