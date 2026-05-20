@@ -442,7 +442,21 @@ function parseJpkFaXml(xmlText, fileName){
 // ═══════════════════════════════════════════════════
 // COMPARISON
 // ═══════════════════════════════════════════════════
-function compare(symEntries, jpkDocs){
+function compare(symEntries, jpkDocs, typRejestru){
+  // Agreguj wiersze Symfonii po numerze faktury (sumuję dla różnych stawek VAT)
+  const aggregated = {};
+  symEntries.forEach(e => {
+    if(!e.nrDok) return;
+    const key = e.nrDok;
+    if(!aggregated[key]) {
+      aggregated[key] = {...e, netto: 0, vat: 0, brutto: 0};
+    }
+    aggregated[key].netto  = (aggregated[key].netto || 0) + (e.netto || 0);
+    aggregated[key].vat    = (aggregated[key].vat || 0) + (e.vat || 0);
+    aggregated[key].brutto = (aggregated[key].brutto || 0) + (e.brutto || 0);
+  });
+  symEntries = Object.values(aggregated);
+
   const TOL = 0.02;
   const norm = s => String(s||'').replace(/[\s\/\-]/g,'').toUpperCase();
   const results = [];
