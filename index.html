@@ -799,6 +799,822 @@ async function runAnalysis(){
     const jpkDocs=jpkNested.flat();
 
     setMsg('<div class="msg-info"><div class="spinner"></div>Porównuję dokumenty...</div>');
+    const typRejestru = document.getElementById('regType').value;
+    const results=compare(register.entries,jpkDocs,typRejestru);
+
+    setMsg('');
+    renderResults(register,jpkDocs,results);
+    const nipsCount=new Set(results.map(r=>r.sym?.nip||r.jpk?.nipSprzed).filter(Boolean)).size;
+    renderWlSection(nipsCount);
+  }catch(e){
+    setMsg(`<div class="msg-error"><strong>Błąd:</strong> ${esc(e.message)}</div>`);
+  }finally{
+    checkReady();
+  }
+}
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weryfikator VAT — Symfonia vs JPK_FA</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f1f5f9;
+      color: #1e293b;
+      min-height: 100vh;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+
+    .header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
+      border-radius: 14px;
+      padding: 22px 28px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .header-icon { font-size: 38px; }
+    .header h1 { color: #f8fafc; font-size: 20px; font-weight: 800; letter-spacing: -.4px; }
+    .header p  { color: #94a3b8; font-size: 13px; margin-top: 3px; }
+    .header-badge { margin-left: auto; background: #0f3460; color: #e2e8f0; border: 1px solid #1d4ed8; border-radius: 8px; padding: 4px 12px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 22px; margin-bottom: 16px; }
+    .card-title { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+
+    .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    @media(max-width: 640px) { .upload-grid { grid-template-columns: 1fr; } }
+
+    .upload-col-label { font-size: 12px; font-weight: 700; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: .05em; display: block; }
+
+    .dropzone {
+      border: 2px dashed #cbd5e1; border-radius: 10px; padding: 22px 14px;
+      text-align: center; cursor: pointer; background: #f8fafc;
+      transition: all .15s; min-height: 105px;
+      display: flex; align-items: center; justify-content: center; flex-direction: column;
+    }
+    .dropzone:hover { border-color: #3b82f6; background: #eff6ff; }
+    .dropzone.active { border-color: #3b82f6; background: #eff6ff; }
+    .dropzone.filled { border-color: #22c55e; background: #f0fdf4; border-style: solid; }
+    .dz-icon  { font-size: 28px; margin-bottom: 6px; }
+    .dz-title { font-weight: 600; color: #475569; font-size: 14px; }
+    .dz-sub   { color: #94a3b8; font-size: 12px; margin-top: 3px; }
+    .dz-name  { font-weight: 700; color: #166534; font-size: 13px; }
+    .dz-size  { color: #64748b; font-size: 11px; margin-top: 2px; }
+    .chip { display: inline-block; background: #dcfce7; color: #166534; border-radius: 5px; padding: 1px 7px; font-size: 11px; margin: 2px; }
+    .btn-clear { margin-top: 8px; font-size: 11px; color: #ef4444; background: none; border: none; cursor: pointer; text-decoration: underline; }
+
+    .btn-primary {
+      width: 100%; background: #0f3460; color: #fff; border: none; border-radius: 10px;
+      padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .15s;
+    }
+    .btn-primary:hover:not(:disabled) { background: #16213e; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-export { background: #0f172a; color: #fff; border: none; border-radius: 8px; padding: 9px 20px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .btn-export:hover { background: #1e293b; }
+
+    .msg-error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 12px 16px; color: #b91c1c; font-size: 13px; margin-bottom: 14px; }
+    .msg-info  { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 12px 16px; color: #1d4ed8; font-size: 13px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+    .spinner   { width: 16px; height: 16px; border: 2px solid #bfdbfe; border-top-color: #1d4ed8; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .reg-meta { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0f3460; border-radius: 10px; padding: 12px 18px; margin-bottom: 14px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; }
+    .reg-meta span { color: #64748b; }
+    .reg-meta strong { color: #0f172a; }
+
+    .summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .sum-box { border-radius: 10px; padding: 10px 18px; font-weight: 700; font-size: 13px; min-width: 115px; text-align: center; line-height: 1.4; }
+    .sum-box .num { font-size: 24px; display: block; }
+    .sum-ok     { background: #d1fae5; color: #065f46; }
+    .sum-bad    { background: #fee2e2; color: #991b1b; }
+    .sum-warn   { background: #fef3c7; color: #92400e; }
+    .sum-purple { background: #ede9fe; color: #4c1d95; }
+    .sum-gray   { background: #f1f5f9; color: #475569; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+    .tab { padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #e2e8f0; background: #fff; color: #64748b; transition: all .12s; }
+    .tab.active { background: #0f3460; color: #fff; border-color: #0f3460; }
+
+    .filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .filter-bar input { border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 12px; font-size: 13px; outline: none; flex: 1; min-width: 180px; }
+    .filter-bar input:focus { border-color: #3b82f6; }
+
+    /* REGISTER TYPE SELECTOR */
+    .reg-type-selector { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; }
+    .reg-type-label { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; display: block; }
+    .reg-type-select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 12px; font-size: 13px; outline: none; min-width: 220px; cursor: pointer; background: #fff; color: #0f172a; font-weight: 600; }
+    .reg-type-select:focus { border-color: #0f3460; box-shadow: 0 0 0 3px rgba(15,52,96,.1); }
+    .reg-type-hint { font-size: 11px; color: #94a3b8; margin-top: 6px; font-style: italic; }
+
+    .tbl-wrap { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 14px; }
+    .tbl-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    thead th { background: #f1f5f9; padding: 9px 11px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; white-space: nowrap; font-size: 11.5px; }
+    tbody td { padding: 8px 11px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr.row-data:hover td { background: #f8fafc; }
+    .tr-expand td { background: #fffbeb !important; padding: 6px 11px 12px; }
+
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 11px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge-ok     { background: #d1fae5; color: #065f46; }
+    .badge-bad    { background: #fee2e2; color: #991b1b; }
+    .badge-warn   { background: #fef3c7; color: #92400e; }
+    .badge-purple { background: #ede9fe; color: #4c1d95; }
+    .badge-gray   { background: #f1f5f9; color: #475569; }
+    .badge-blue   { background: #dbeafe; color: #1e40af; }
+
+    .issues { margin: 4px 0 0 16px; color: #b91c1c; font-size: 12px; line-height: 1.9; }
+    .btn-toggle { background: none; border: 1px solid #e2e8f0; border-radius: 5px; padding: 2px 9px; font-size: 11px; cursor: pointer; color: #64748b; }
+    .btn-toggle:hover { background: #f1f5f9; }
+
+    .cell-old { color: #991b1b; text-decoration: line-through; font-size: 11px; margin-right: 3px; }
+    .cell-new { color: #065f46; font-weight: 600; }
+    .cell-nil { color: #94a3b8; }
+
+    /* WHITELIST */
+    .wl-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+    .wl-header { background: #f8fafc; padding: 14px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+    .wl-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+    .wl-subtitle { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .btn-wl { background: #0f3460; color: #fff; border: none; border-radius: 8px; padding: 9px 20px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .btn-wl:hover:not(:disabled) { background: #16213e; }
+    .btn-wl:disabled { opacity: .4; cursor: not-allowed; }
+    .wl-progress { padding: 14px 20px; font-size: 13px; color: #475569; display: flex; align-items: center; gap: 12px; }
+    .wl-progress-bar-wrap { flex: 1; background: #e2e8f0; border-radius: 6px; height: 8px; min-width: 120px; }
+    .wl-progress-bar { background: #0f3460; height: 8px; border-radius: 6px; transition: width .3s; }
+    .wl-scroll { overflow-x: auto; }
+    .wl-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .wl-table th { background: #f1f5f9; padding: 9px 12px; text-align: left; font-weight: 700; color: #475569; border-bottom: 2px solid #e2e8f0; white-space: nowrap; font-size: 11.5px; }
+    .wl-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; font-size: 12.5px; }
+    .wl-table tr:last-child td { border-bottom: none; }
+    .addr-ok   { color: #065f46; font-weight: 600; font-size: 12px; }
+    .addr-warn { color: #b45309; font-weight: 600; font-size: 12px; }
+    .addr-err  { color: #b91c1c; font-weight: 600; font-size: 12px; }
+    .addr-text { font-size: 11px; color: #64748b; margin-top: 3px; line-height: 1.5; }
+    .wl-accounts { font-size: 11px; color: #475569; line-height: 1.7; }
+    .wl-sum { display: flex; gap: 10px; padding: 14px 20px; flex-wrap: wrap; border-bottom: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-icon">🎼</div>
+    <div>
+      <h1>Weryfikator VAT — Symfonia vs JPK_FA</h1>
+      <p>Porównaj rejestr VAT z Symfonii (XLSX) z plikiem JPK_FA (XML) — weryfikacja dat, kwot, stawek i numerów KSeF</p>
+    </div>
+    <div class="header-badge">Symfonia FK · JPK_FA</div>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="card">
+    <div class="card-title">1. Wgraj pliki</div>
+    <div class="upload-grid">
+
+      <!-- XLSX -->
+      <div>
+        <span class="upload-col-label">Rejestr VAT z Symfonii (XLSX)</span>
+        <label>
+          <input type="file" id="xlsxInput" accept=".xlsx,.xls" style="display:none" onchange="onXlsxChange(event)" />
+          <div class="dropzone" id="xlsxZone"
+               ondragover="onDragOver(event,'xlsxZone')" ondragleave="onDragLeave('xlsxZone')" ondrop="onDropXlsx(event)">
+            <div id="xlsxContent">
+              <div class="dz-icon">📊</div>
+              <div class="dz-title">Upuść plik XLSX lub kliknij</div>
+              <div class="dz-sub">Rejestr zakupu lub sprzedaży VAT</div>
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <!-- XML -->
+      <div>
+        <span class="upload-col-label">JPK_FA (XML) — można wiele</span>
+        <label>
+          <input type="file" id="xmlInput" accept=".xml" multiple style="display:none" onchange="onXmlChange(event)" />
+          <div class="dropzone" id="xmlZone"
+               ondragover="onDragOver(event,'xmlZone')" ondragleave="onDragLeave('xmlZone')" ondrop="onDropXml(event)">
+            <div id="xmlContent">
+              <div class="dz-icon">📎</div>
+              <div class="dz-title">Upuść pliki XML lub kliknij</div>
+              <div class="dz-sub">Eksport JPK_FA (standard MF)</div>
+            </div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <div class="reg-type-selector">
+      <label class="reg-type-label">Typ rejestru</label>
+      <select id="regType" class="reg-type-select">
+        <option value="auto">🔍 Auto-detekcja</option>
+        <option value="zakup">📥 Zakup (naliczony VAT)</option>
+        <option value="sprzedaz">📤 Sprzedaż (należny VAT)</option>
+      </select>
+      <div class="reg-type-hint" id="regTypeHint"></div>
+    </div>
+
+    <button class="btn-primary" id="btnAnalyze" disabled onclick="runAnalysis()">
+      🔍 Analizuj i porównaj
+    </button>
+  </div>
+
+  <div id="msgArea"></div>
+  <div id="results"></div>
+  <div id="wlSection" style="display:none"></div>
+
+</div>
+<script>
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+let xlsxFile = null, xmlFiles = [];
+let expandedRows = new Set();
+let currentFilter = 'all', searchText = '';
+let lastResults = null, lastRegister = null;
+let wlResults = [];
+
+// ═══════════════════════════════════════════════════
+// DRAG & DROP
+// ═══════════════════════════════════════════════════
+function onDragOver(e,id){ e.preventDefault(); document.getElementById(id).classList.add('active'); }
+function onDragLeave(id) { document.getElementById(id).classList.remove('active'); }
+function onDropXlsx(e){ e.preventDefault(); onDragLeave('xlsxZone'); if(e.dataTransfer.files[0]) setXlsx(e.dataTransfer.files[0]); }
+function onDropXml(e) { e.preventDefault(); onDragLeave('xmlZone'); addXmlFiles(Array.from(e.dataTransfer.files).filter(f=>f.name.endsWith('.xml'))); }
+function onXlsxChange(e){ if(e.target.files[0]) setXlsx(e.target.files[0]); }
+function onXmlChange(e) { addXmlFiles(Array.from(e.target.files)); }
+
+function setXlsx(f){
+  xlsxFile = f;
+  document.getElementById('xlsxZone').classList.add('filled');
+  document.getElementById('xlsxContent').innerHTML = `<div class="dz-icon">📊</div><div class="dz-name">${esc(f.name)}</div><div class="dz-size">${(f.size/1024).toFixed(0)} KB · XLSX</div>`;
+  checkReady();
+}
+function addXmlFiles(files){
+  const ex = new Set(xmlFiles.map(f=>f.name));
+  files.forEach(f=>{ if(!ex.has(f.name)) xmlFiles.push(f); });
+  renderXmlZone(); checkReady();
+}
+function clearXml(){ xmlFiles=[]; renderXmlZone(); checkReady(); }
+function renderXmlZone(){
+  const zone = document.getElementById('xmlZone');
+  if(!xmlFiles.length){
+    zone.classList.remove('filled');
+    document.getElementById('xmlContent').innerHTML = `<div class="dz-icon">📎</div><div class="dz-title">Upuść pliki XML lub kliknij</div><div class="dz-sub">Eksport JPK_FA (standard MF)</div>`;
+    return;
+  }
+  zone.classList.add('filled');
+  const chips = xmlFiles.slice(0,5).map(f=>`<span class="chip">${esc(f.name)}</span>`).join('');
+  const more  = xmlFiles.length>5 ? `<span class="chip">+${xmlFiles.length-5}</span>` : '';
+  document.getElementById('xmlContent').innerHTML = `<div class="dz-icon">📂</div><div class="dz-name">${xmlFiles.length} plik(ów) XML</div><div style="margin-top:6px">${chips}${more}</div><button class="btn-clear" onclick="event.preventDefault();clearXml()">Wyczyść</button>`;
+}
+function checkReady(){ 
+  document.getElementById('btnAnalyze').disabled = !(xlsxFile && xmlFiles.length); 
+  // Show detected type hint
+  if(xlsxFile && document.getElementById('regType').value === 'auto') {
+    const hint = document.getElementById('regTypeHint');
+    hint.innerHTML = '⏳ Typ będzie automatycznie wykryty z pliku...';
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmt(v){
+  if(v==null) return '<span class="cell-nil">—</span>';
+  if(typeof v!=='number') return esc(v);
+  return v.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})+' zł';
+}
+function fmtRaw(v){
+  if(v==null) return '—';
+  if(typeof v!=='number') return String(v);
+  return v.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})+' zł';
+}
+function toDateStr(v){
+  if(!v && v !== 0) return null;
+  // raw:false XLSX.js konwertuje na stringi dat takie jak "4/7/26" lub "4/30/2026"
+  const s = String(v).trim();
+  if(!s) return null;
+  // YYYY-MM-DD
+  if(s.match(/^\d{4}-\d{2}-\d{2}/)) return s.substring(0,10);
+  // M/D/YY lub MM/DD/YYYY (XLSX.js format z raw:false)
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m){
+    const month = m[1].padStart(2,'0');
+    const day   = m[2].padStart(2,'0');
+    const year  = m[3].length === 2 ? '20' + m[3] : m[3];
+    return `${year}-${month}-${day}`;
+  }
+  // DD.MM.YYYY
+  const m2 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if(m2) return `${m2[3]}-${m2[2]}-${m2[1]}`;
+  return s.substring(0,10);
+}
+function setMsg(html){ document.getElementById('msgArea').innerHTML = html; }
+function readAB(f){ return new Promise((r,j)=>{ const rd=new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>j(new Error('Błąd odczytu')); rd.readAsArrayBuffer(f); }); }
+function readTxt(f){ return new Promise((r,j)=>{ const rd=new FileReader(); rd.onload=()=>r(rd.result); rd.onerror=()=>j(new Error('Błąd odczytu')); rd.readAsText(f,'UTF-8'); }); }
+
+// ═══════════════════════════════════════════════════
+// SYMFONIA XLSX PARSER
+// Struktura: wiersz 1 = nagłówki, wiersze 2+ = dane
+// Kolumny (0-indexed):
+//  0=S, 1=Z, 2=B, 3=Okres rejestru, 4=Okres dokumentu,
+//  5=Data dokumentu, 6=Data operacji gosp., 7=Data KSeF,
+//  8=Numer KSeF, 9=Pełny numer ewid., 10=Skrót dok.,
+//  11=Numer dokumentu, 12=Netto, 13=VAT, 14=Brutto,
+//  15=Nazwa kontrahenta, 16=NIP, 17=Nr kontrahenta,
+//  18=Stawka VAT, 19=ABCD, 20=UE, 21=U,
+//  22=Treść dokumentu, 23=Data wpływu, 27=JPK_V7 dok.
+// ═══════════════════════════════════════════════════
+function parseSymfoniaXlsx(arrayBuffer){
+  const wb = XLSX.read(arrayBuffer, { type:'array', cellDates:true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+
+  if(!rows.length) throw new Error('Plik XLSX jest pusty');
+
+  // Wiersz 0 = nagłówki
+  const headers = rows[0];
+
+  // Typ rejestru — użytkownik wybiera lub auto-detekcja
+  let typRejestru = document.getElementById('regType').value;
+  let autoDetected = null;
+  let firma = null, nip = null, okres = null;
+
+  const entries = [];
+
+  for(let i=1; i<rows.length; i++){
+    const r = rows[i];
+    if(!r || !r[11]) continue; // pomiń puste wiersze
+
+    const nrDok   = r[11] ? String(r[11]).trim() : null;
+    const nrEwid  = r[9]  ? String(r[9]).trim()  : null;
+    const skrot   = r[10] ? String(r[10]).trim()  : null;
+    const dataDok = toDateStr(r[5]);  // Data dokumentu (wysłania do KSeF)
+    const dataOp  = toDateStr(r[6]);  // Data operacji gosp. (faktyczna data faktury)
+    const dataSprz = typRejestru === 'sprzedaz' ? dataOp : dataDok;  // Właściwa data do porównania
+    const dataKsef= toDateStr(r[7]);
+    const nrKsef  = r[8]  ? String(r[8]).trim()  : null;
+    const parseAmt = v => {
+      if(v == null) return null;
+      if(typeof v === 'number') return Math.round(v * 100) / 100;
+      const s = String(v).replace(/\s/g,'').replace(',','.');
+      const n = parseFloat(s);
+      return isNaN(n) ? null : Math.round(n * 100) / 100;
+    };
+    const netto   = parseAmt(r[12]);
+    const vat     = parseAmt(r[13]);
+    const brutto  = parseAmt(r[14]);
+    const kontrah = r[15] ? String(r[15]).trim() : null;
+    const nipKtr  = r[16] ? String(r[16]).trim() : null;
+    const stawka  = r[18] ? String(r[18]).trim() : null;
+    const abcd    = r[19] ? String(r[19]).trim() : null;
+    const jpkDok  = r[27] ? String(r[27]).trim() : null;
+    const nazwaRej= r[26] ? String(r[26]).trim() : null;
+    const dataWpl = toDateStr(r[23]);
+
+    // Auto-detekcja z pierwszego wiersza (dla sugestii)
+    if(!autoDetected && nazwaRej){
+      if(nazwaRej.toLowerCase().includes('zakup') || skrot?.startsWith('FVZ') || skrot?.startsWith('IU'))
+        autoDetected = 'zakup';
+      else if(nazwaRej.toLowerCase().includes('sprzedaż') || skrot?.startsWith('FVS'))
+        autoDetected = 'sprzedaz';
+    }
+    if(!okres && r[3]) okres = String(r[3]).trim();
+
+    const isBfk = jpkDok?.includes('BFK') || (!nrKsef && !dataKsef);
+
+    entries.push({
+      nrDok, nrEwid, skrot, dataDok, dataOp, dataSprz, dataKsef, nrKsef,
+      netto, vat, brutto, kontrahent: kontrah, nip: nipKtr,
+      stawka, abcd, jpkDok, nazwaRej, dataWpl,
+      isBfk: isBfk && !nrKsef,
+    });
+  }
+
+  return { firma, nip, okres, typRejestru, entries };
+}
+
+// ═══════════════════════════════════════════════════
+// JPK_FA XML PARSER
+// ═══════════════════════════════════════════════════
+function parseJpkFaXml(xmlText, fileName){
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText,'text/xml');
+    const ns = 'http://jpk.mf.gov.pl/wzor/2022/02/17/02171/';
+    const getEl = (p,t) => p.getElementsByTagNameNS(ns,t)[0] || p.getElementsByTagName(t)[0];
+    const getVal = (p,t) => { const el=getEl(p,t); return el?el.textContent.trim():null; };
+    const getNum = (p,t) => { const v=getVal(p,t); return v?Math.round(parseFloat(v.replace(',','.'))*100)/100:null; };
+
+    const faktury = Array.from(
+      doc.getElementsByTagNameNS(ns,'Faktura').length
+        ? doc.getElementsByTagNameNS(ns,'Faktura')
+        : doc.getElementsByTagName('Faktura')
+    );
+    if(!faktury.length) throw new Error('Brak tagów <Faktura> w pliku');
+
+    return faktury.map(f=>{
+      const netto23=getNum(f,'P_13_1'), vat23=getNum(f,'P_14_1');
+      const netto8 =getNum(f,'P_13_2'), vat8 =getNum(f,'P_14_2');
+      const netto5 =getNum(f,'P_13_3'), vat5 =getNum(f,'P_14_3');
+      const brutto =getNum(f,'P_15');
+      const netto  = Math.round(([netto23,netto8,netto5].filter(Boolean).reduce((a,b)=>a+b,0))*100)/100;
+      const vat    = Math.round(([vat23,vat8,vat5].filter(Boolean).reduce((a,b)=>a+b,0))*100)/100;
+      const stawki = [];
+      if(netto23!=null) stawki.push('23%');
+      if(netto8 !=null) stawki.push('8%');
+      if(netto5 !=null) stawki.push('5%');
+      return {
+        fileName,
+        nrFaktury:  getVal(f,'P_2A'),
+        dataWyst:   getVal(f,'P_1'),  // Data wystawienia (może być inna dla sprzedaży)
+        dataSprz:   getVal(f,'P_6'),  // Data sprzedaży/dostawy — użyj tego dla porównania
+        nipSprzed:  getVal(f,'P_4B'),
+        nipNabywcy: getVal(f,'P_5B'),
+        kontrahent: getVal(f,'P_3C'),
+        adresSprz:  getVal(f,'P_3D'),
+        netto:netto||null, vat:vat||null, brutto:brutto||null,
+        stawki: stawki.join(', ')||'—',
+      };
+    });
+  } catch(e){
+    return [{ fileName, error:e.message }];
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// COMPARISON
+// ═══════════════════════════════════════════════════
+function compare(symEntries, jpkDocs){
+  const TOL = 0.02;
+  const norm = s => String(s||'').replace(/[\s\/\-]/g,'').toUpperCase();
+  const results = [];
+
+  jpkDocs.forEach(jpk=>{
+    if(jpk.error){
+      results.push({ jpk, sym:null, status:'xml_error', issues:[`Błąd XML: ${jpk.error}`] });
+      return;
+    }
+    // Dopasowanie: numer faktury + NIP kontrahenta
+    // Rejestr zakupu: e.nip = NIP sprzedawcy, jpk.nipSprzed = P_4B (NIP wystawcy)
+    // Rejestr sprzedaży: e.nip = NIP nabywcy, jpk.nipNabywcy = P_5B (NIP nabywcy)
+    let match = symEntries.find(e =>
+      e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) && (
+        (e.nip && jpk.nipSprzed  && norm(e.nip) === norm(jpk.nipSprzed))  ||
+        (e.nip && jpk.nipNabywcy && norm(e.nip) === norm(jpk.nipNabywcy))
+      )
+    );
+    // Fallback: tylko numer (gdy NIP niedostępny w jednym ze źródeł)
+    if(!match) {
+      match = symEntries.find(e =>
+        e.nrDok && jpk.nrFaktury && norm(e.nrDok) === norm(jpk.nrFaktury) &&
+        (!e.nip || (!jpk.nipSprzed && !jpk.nipNabywcy))
+      );
+    }
+    if(!match){
+      results.push({ jpk, sym:null, status:'not_found', issues:[`Faktura ${jpk.nrFaktury||'?'} (NIP: ${jpk.nipSprzed||'?'}) nie znaleziona w rejestrze Symfonii`] });
+      return;
+    }
+
+    const issues = [];
+
+    // Kwoty
+    if(match.netto!=null && jpk.netto && Math.abs(match.netto-jpk.netto)>TOL)
+      issues.push(`Netto: Symfonia ${fmtRaw(match.netto)} ≠ JPK ${fmtRaw(jpk.netto)}`);
+    if(match.vat!=null && jpk.vat && Math.abs(match.vat-jpk.vat)>TOL)
+      issues.push(`VAT: Symfonia ${fmtRaw(match.vat)} ≠ JPK ${fmtRaw(jpk.vat)}`);
+    if(match.brutto!=null && jpk.brutto && Math.abs(match.brutto-jpk.brutto)>TOL)
+      issues.push(`Brutto: Symfonia ${fmtRaw(match.brutto)} ≠ JPK ${fmtRaw(jpk.brutto)}`);
+
+    // Daty — użyj dataSprz zamiast dataDok
+    const normD = s => { if(!s) return null; const m=String(s).match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return m?`${m[3]}-${m[2]}-${m[1]}`:String(s).substring(0,10); };
+    const symData = normD(match.dataSprz || match.dataDok);
+    const jpkData = normD(jpk.dataSprz || jpk.dataWyst);  // Preferuj P_6 dla sprzedaży
+    if(symData && jpkData && symData!==jpkData)
+      issues.push(`Data dokumentu: Symfonia ${match.dataSprz || match.dataDok} ≠ JPK ${jpk.dataWyst}`);
+
+    // NIP — dopasuj właściwy w zależności od typu rejestru
+    // Dla rejestru ZAKUPU: kontrahent = sprzedawca (P_4B)
+    // Dla rejestru SPRZEDAŻY: kontrahent = nabywca (P_5B)
+    const jpkNipKontrahenta = typRejestru === 'sprzedaz' 
+      ? (jpk.nipNabywcy || jpk.nipSprzed)
+      : (jpk.nipSprzed || jpk.nipNabywcy);
+    if(match.nip && jpkNipKontrahenta && norm(match.nip)!==norm(jpkNipKontrahenta))
+      issues.push(`NIP kontrahenta: Symfonia ${match.nip} ≠ JPK ${jpkNipKontrahenta}`);
+
+    results.push({ jpk, sym:match, status:issues.length?'mismatch':'ok', issues });
+  });
+
+  // Pozycje w Symfonii bez JPK
+  symEntries.forEach(e=>{
+    // Dopasowanie z NIP gdy dostępny (obsługa zakupu i sprzedaży)
+    const found = jpkDocs.find(k=>
+      k.nrFaktury && e.nrDok && norm(e.nrDok)===norm(k.nrFaktury) && (
+        !e.nip || (!k.nipSprzed && !k.nipNabywcy) ||
+        (k.nipSprzed  && norm(e.nip)===norm(k.nipSprzed))  ||
+        (k.nipNabywcy && norm(e.nip)===norm(k.nipNabywcy))
+      )
+    );
+    if(!found){
+      const bfkInfo = e.isBfk ? ' (BFK — brak obowiązku KSeF)' : '';
+      results.push({
+        jpk:null, sym:e,
+        status: e.isBfk ? 'bfk' : 'no_jpk',
+        issues:[`Brak wpisu JPK_FA dla: ${e.nrDok||e.nrEwid}${bfkInfo}`]
+      });
+    }
+  });
+
+  return results;
+}
+
+// ═══════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════
+function badge(status){
+  const cfg = {
+    ok:       ['badge-ok',    '✓ Zgodna'],
+    mismatch: ['badge-bad',   '✗ Niezgodność'],
+    not_found:['badge-warn',  '⚠ Brak w rejestrze'],
+    no_jpk:   ['badge-purple','⚠ Brak w JPK'],
+    bfk:      ['badge-gray',  '○ BFK'],
+    xml_error:['badge-bad',   '✗ Błąd XML'],
+  };
+  const [cls,lbl] = cfg[status]||['badge-bad','?'];
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
+function cellCmp(a,b){
+  if(!a&&!b) return '<span class="cell-nil">—</span>';
+  if(!a) return esc(b||'');
+  if(!b) return esc(a||'');
+  if(String(a)===String(b)) return esc(a);
+  return `<span class="cell-old">${esc(a)}</span><span class="cell-new">${esc(b)}</span>`;
+}
+
+function buildTbody(results){
+  const filtered = results.filter(r=>{
+    if(currentFilter!=='all' && r.status!==currentFilter) return false;
+    if(searchText){
+      const hay = [r.sym?.nrDok,r.sym?.kontrahent,r.sym?.nip,r.jpk?.nrFaktury,r.jpk?.fileName].filter(Boolean).join(' ').toLowerCase();
+      if(!hay.includes(searchText.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  if(!filtered.length) return `<tr><td colspan="11" style="text-align:center;padding:24px;color:#94a3b8">Brak wyników</td></tr>`;
+
+  return filtered.map((r,i)=>{
+    const nr = esc(r.sym?.nrDok||r.jpk?.nrFaktury||'—');
+    const nrEwid = esc(r.sym?.nrEwid||'—');
+    const kontrahent = esc(r.sym?.kontrahent||'—');
+    const origIdx = results.indexOf(r);
+    const exp = expandedRows.has(origIdx);
+
+    // KSeF status badge
+    let ksefBadge = '';
+    if(r.sym?.nrKsef) ksefBadge = `<span class="badge badge-blue" title="${esc(r.sym.nrKsef)}" style="font-size:10px">KSeF ✓</span>`;
+    else if(r.sym?.isBfk) ksefBadge = `<span class="badge badge-gray" style="font-size:10px">BFK</span>`;
+
+    const main = `<tr class="row-data">
+      <td>${badge(r.status)}</td>
+      <td style="font-weight:600">${nr} ${ksefBadge}</td>
+      <td style="color:#64748b;font-size:11.5px">${nrEwid}</td>
+      <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${kontrahent}">${kontrahent}</td>
+      <td>${cellCmp(r.sym?.dataSprz || r.sym?.dataDok, r.jpk?.dataWyst)}</td>
+      <td>${esc(r.jpk?.dataSprz||'—')}</td>
+      <td>${fmt(r.sym?.netto)}</td>
+      <td>${fmt(r.jpk?.netto)}</td>
+      <td>${fmt(r.sym?.vat)}</td>
+      <td>${fmt(r.jpk?.vat)}</td>
+      <td>${r.issues?.length?`<button class="btn-toggle" onclick="toggleRow(${origIdx})">${exp?'▲ Ukryj':'▼ '+r.issues.length+' uwag'}</button>`:''}</td>
+    </tr>`;
+
+    const expRow = (exp&&r.issues?.length) ? `<tr class="tr-expand"><td colspan="11">
+      <ul class="issues">${r.issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>
+    </td></tr>` : '';
+
+    return main+expRow;
+  }).join('');
+}
+
+function toggleRow(i){ expandedRows.has(i)?expandedRows.delete(i):expandedRows.add(i); document.getElementById('tbody').innerHTML=buildTbody(lastResults); }
+
+function setFilter(f){
+  currentFilter=f;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+f).classList.add('active');
+  document.getElementById('tbody').innerHTML=buildTbody(lastResults);
+}
+
+function renderResults(register, jpkDocs, results){
+  lastResults=results; lastRegister=register;
+  expandedRows.clear(); currentFilter='all'; searchText='';
+
+  const counts = results.reduce((a,r)=>{ a[r.status]=(a[r.status]||0)+1; return a; },{});
+
+  const typLabel = register.typRejestru==='zakup'?'📥 Zakup (naliczony)':register.typRejestru==='sprzedaz'?'📤 Sprzedaż (należny)':'—';
+
+  const meta = `<div class="reg-meta">
+    <div><span>Rejestr: </span><strong>${typLabel}</strong></div>
+    <div><span>Okres: </span><strong>${esc(register.okres||'—')}</strong></div>
+    <div><span>Pozycji w rejestrze: </span><strong>${register.entries.length}</strong></div>
+    <div><span>Pliki JPK_FA: </span><strong>${jpkDocs.length}</strong></div>
+    <div><span>Faktur w JPK: </span><strong>${jpkDocs.length}</strong></div>
+  </div>`;
+
+  const summary = `<div class="summary">
+    <div class="sum-box sum-ok">✓ Zgodne<span class="num">${counts.ok||0}</span></div>
+    <div class="sum-box sum-bad">✗ Niezgodności<span class="num">${counts.mismatch||0}</span></div>
+    <div class="sum-box sum-warn">⚠ Brak w rej.<span class="num">${counts.not_found||0}</span></div>
+    <div class="sum-box sum-purple">⚠ Brak w JPK<span class="num">${counts.no_jpk||0}</span></div>
+    <div class="sum-box sum-gray">○ BFK<span class="num">${counts.bfk||0}</span></div>
+    ${counts.xml_error?`<div class="sum-box sum-bad">✗ Błąd XML<span class="num">${counts.xml_error}</span></div>`:''}
+  </div>`;
+
+  const tabs = `<div class="tabs">
+    <button id="tab-all"       class="tab active" onclick="setFilter('all')">Wszystkie (${results.length})</button>
+    <button id="tab-mismatch"  class="tab" onclick="setFilter('mismatch')">Niezgodności (${counts.mismatch||0})</button>
+    <button id="tab-not_found" class="tab" onclick="setFilter('not_found')">Brak w rejestrze (${counts.not_found||0})</button>
+    <button id="tab-no_jpk"    class="tab" onclick="setFilter('no_jpk')">Brak w JPK (${counts.no_jpk||0})</button>
+    <button id="tab-ok"        class="tab" onclick="setFilter('ok')">Zgodne (${counts.ok||0})</button>
+  </div>`;
+
+  const filterBar = `<div class="filter-bar">
+    <input type="text" placeholder="🔎 Szukaj po numerze, kontrahencie, NIP..." oninput="searchText=this.value;document.getElementById('tbody').innerHTML=buildTbody(lastResults)" />
+    <button class="btn-export" onclick="exportCsv()">⬇ Eksportuj CSV</button>
+  </div>`;
+
+  const table = `<div class="tbl-wrap"><div class="tbl-scroll"><table>
+    <thead><tr>
+      <th>Status</th><th>Nr dokumentu</th><th>Nr ewidencyjny</th><th>Kontrahent</th>
+      <th>Data dok.</th><th>Data sprz. (JPK)</th>
+      <th>Netto (Sym.)</th><th>Netto (JPK)</th>
+      <th>VAT (Sym.)</th><th>VAT (JPK)</th>
+      <th>Szczegóły</th>
+    </tr></thead>
+    <tbody id="tbody">${buildTbody(results)}</tbody>
+  </table></div></div>`;
+
+  document.getElementById('results').innerHTML = meta+summary+tabs+filterBar+table;
+}
+
+// ═══════════════════════════════════════════════════
+// BIAŁA LISTA MF
+// ═══════════════════════════════════════════════════
+function normAddr(s){
+  if(!s) return '';
+  return s.toLowerCase().replace(/\bul\b\.?\s*/g,'').replace(/\baleja\b/g,'al').replace(/\bal\b\.?\s*/g,'').replace(/\bplac\b/g,'pl').replace(/\bpl\b\.?\s*/g,'').replace(/\s+/g,' ').replace(/[,.-]/g,' ').trim();
+}
+function addrMatch(a,b){
+  if(!a||!b) return null;
+  const na=normAddr(a), nb=normAddr(b);
+  if(na===nb) return 'exact';
+  const ta=new Set(na.split(' ').filter(t=>t.length>1));
+  const tb=new Set(nb.split(' ').filter(t=>t.length>1));
+  let common=0; ta.forEach(t=>{ if(tb.has(t)) common++; });
+  const score=common/Math.max(ta.size,tb.size);
+  if(score>=0.7) return 'similar';
+  if(score>=0.4) return 'partial';
+  return 'different';
+}
+async function queryWL(nip,date){
+  const resp = await fetch(`https://wl-api.mf.gov.pl/api/search/nip/${nip}?date=${date}`);
+  if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return data?.result?.subject||null;
+}
+function collectNips(results){
+  const map = new Map();
+  results.forEach(r=>{
+    const nip = r.sym?.nip||r.jpk?.nipSprzed;
+    if(!nip||map.has(nip)) return;
+    let date = r.sym?.dataDok||r.jpk?.dataWyst||'';
+    if(date.match(/^\d{2}\.\d{2}\.\d{4}$/)){const[d,m,y]=date.split('.'); date=`${y}-${m}-${d}`;}
+    date = date.substring(0,10)||new Date().toISOString().substring(0,10);
+    map.set(nip,{ nip, date, kontrahent:r.sym?.kontrahent||nip, adresFaktury:r.jpk?.adresSprz||null });
+  });
+  return Array.from(map.values());
+}
+
+async function runWhitelistCheck(){
+  const btn = document.getElementById('btnWl');
+  btn.disabled=true; wlResults=[];
+  const nips=collectNips(lastResults);
+  const total=nips.length; let done=0;
+  const renderProg=()=>{ document.getElementById('wlProgress').innerHTML=`<div class="wl-progress"><div class="wl-progress-bar-wrap"><div class="wl-progress-bar" style="width:${Math.round(done/total*100)}%"></div></div><span>${done} / ${total} sprawdzonych</span></div>`; };
+  renderProg();
+  for(let i=0;i<nips.length;i+=3){
+    const batch=nips.slice(i,i+3);
+    await Promise.all(batch.map(async({nip,date,kontrahent,adresFaktury})=>{
+      try{
+        const subj=await queryWL(nip,date);
+        if(!subj){ wlResults.push({nip,date,kontrahent,adresFaktury,status:'not_found',raw:null}); return; }
+        const statusVat=subj.statusVat||'—';
+        const adresBL=subj.residenceAddress||subj.workingAddress||null;
+        const rachunki=subj.accountNumbers||[];
+        wlResults.push({ nip,date,kontrahent,adresFaktury,statusVat,adresBL,rachunki, adresStatus:addrMatch(adresFaktury,adresBL), status:statusVat==='Czynny'?'ok':'warn', raw:subj });
+      }catch(e){ wlResults.push({nip,date,kontrahent,adresFaktury,status:'error',error:e.message}); }
+      done++; renderProg();
+    }));
+    if(i+3<nips.length) await new Promise(r=>setTimeout(r,350));
+  }
+  renderWlResults(); btn.disabled=false;
+}
+
+function renderWlResults(){
+  const addrIcon=s=>({exact:'<span class="addr-ok">✓ Zgodny</span>',similar:'<span class="addr-ok">≈ Podobny</span>',partial:'<span class="addr-warn">⚠ Częściowy</span>',different:'<span class="addr-err">✗ Różny</span>',null:'<span style="color:#94a3b8">— brak adresu na dok.</span>'}[s]||'<span style="color:#94a3b8">—</span>');
+  const vatBadge=s=>{ if(s==='Czynny') return '<span class="badge badge-ok">✓ Czynny</span>'; if(s==='Zwolniony') return '<span class="badge badge-warn">○ Zwolniony</span>'; if(s==='Niezarejestrowany') return '<span class="badge badge-bad">✗ Niezarej.</span>'; return `<span class="badge badge-gray">${esc(s)}</span>`; };
+  const counts=wlResults.reduce((a,r)=>{ a[r.status]=(a[r.status]||0)+1; return a; },{});
+  const sumHtml=`<div class="wl-sum"><div class="sum-box sum-ok" style="min-width:100px">✓ Czynny VAT<span class="num">${counts.ok||0}</span></div><div class="sum-box sum-bad" style="min-width:100px">✗ Problem<span class="num">${(counts.warn||0)+(counts.not_found||0)+(counts.error||0)}</span></div></div>`;
+  const rows=wlResults.map(r=>{
+    if(r.status==='error') return `<tr><td><span class="badge badge-bad">✗ Błąd API</span></td><td><strong>${esc(r.nip)}</strong></td><td>${esc(r.kontrahent)}</td><td colspan="2" style="color:#b91c1c;font-size:12px">${esc(r.error)}</td></tr>`;
+    if(r.status==='not_found') return `<tr><td><span class="badge badge-bad">✗ Nie znaleziony</span></td><td><strong>${esc(r.nip)}</strong></td><td>${esc(r.kontrahent)}</td><td colspan="2" style="color:#b91c1c;font-size:12px">NIP nie figuruje w rejestrze MF na dzień ${esc(r.date)}</td></tr>`;
+    const rachHtml=r.rachunki?.length?`<div class="wl-accounts">${r.rachunki.map(a=>`<div>• ${esc(a)}</div>`).join('')}</div>`:'<span style="color:#94a3b8;font-size:11px">brak zarejestrowanych</span>';
+    return `<tr><td>${vatBadge(r.statusVat)}</td><td><strong>${esc(r.nip)}</strong><div style="font-size:11px;color:#64748b">${esc(r.date)}</div></td><td>${esc(r.kontrahent)}</td><td>${addrIcon(r.adresStatus)}${r.adresFaktury?`<div class="addr-text">Dok.: ${esc(r.adresFaktury)}</div>`:''}${r.adresBL?`<div class="addr-text">BL: ${esc(r.adresBL)}</div>`:''}</td><td>${rachHtml}</td></tr>`;
+  }).join('');
+  document.getElementById('wlProgress').innerHTML='';
+  document.getElementById('wlBody').innerHTML=sumHtml+`<div class="wl-scroll"><table class="wl-table"><thead><tr><th>Status VAT</th><th>NIP / Data</th><th>Kontrahent</th><th>Adres rejestrowy</th><th>Rachunki bankowe (BL)</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderWlSection(nipsCount){
+  document.getElementById('wlSection').style.display='block';
+  document.getElementById('wlSection').innerHTML=`<div class="wl-section"><div class="wl-header"><div><div class="wl-title">🏛 Weryfikacja Białej Listy MF</div><div class="wl-subtitle">Sprawdź ${nipsCount} unikalnych kontrahentów — status VAT, adres rejestrowy, rachunki bankowe</div></div><button class="btn-wl" id="btnWl" onclick="runWhitelistCheck()">▶ Sprawdź na Białej Liście</button></div><div id="wlProgress"></div><div id="wlBody"></div></div>`;
+}
+
+// ═══════════════════════════════════════════════════
+// EXPORT CSV
+// ═══════════════════════════════════════════════════
+function exportCsv(){
+  if(!lastResults) return;
+  const lbl={ok:'Zgodna',mismatch:'Niezgodność',not_found:'Brak w rejestrze',no_jpk:'Brak w JPK',bfk:'BFK',xml_error:'Błąd XML'};
+  const rows=[['Status','Nr dokumentu','Nr ewidencyjny','Kontrahent','NIP','Data dok. (Sym.)','Data dok. (JPK)','Data sprz. (JPK)','Netto (Sym.)','Netto (JPK)','VAT (Sym.)','VAT (JPK)','Brutto (Sym.)','Brutto (JPK)','Stawka VAT','Nr KSeF (Sym.)','ABCD','Plik JPK','Uwagi']];
+  lastResults.forEach(r=>rows.push([
+    lbl[r.status]||r.status,
+    r.sym?.nrDok||r.jpk?.nrFaktury||'',
+    r.sym?.nrEwid||'',
+    r.sym?.kontrahent||'',
+    r.sym?.nip||'',
+    r.sym?.dataSprz||r.sym?.dataDok||'',
+    r.jpk?.dataWyst||'',
+    r.jpk?.dataSprz||'',
+    r.sym?.netto??'',
+    r.jpk?.netto??'',
+    r.sym?.vat??'',
+    r.jpk?.vat??'',
+    r.sym?.brutto??'',
+    r.jpk?.brutto??'',
+    r.sym?.stawka||'',
+    r.sym?.nrKsef||'',
+    r.sym?.abcd||'',
+    r.jpk?.fileName||'',
+    (r.issues||[]).join(' | '),
+  ]));
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`weryfikacja_vat_symfonia_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ═══════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════
+async function runAnalysis(){
+  document.getElementById('btnAnalyze').disabled=true;
+  document.getElementById('results').innerHTML='';
+  document.getElementById('wlSection').style.display='none';
+  setMsg('');
+  try{
+    setMsg('<div class="msg-info"><div class="spinner"></div>Wczytuję rejestr Symfonii (XLSX)...</div>');
+    const ab=await readAB(xlsxFile);
+    const register=parseSymfoniaXlsx(ab);
+    if(!register.entries.length) throw new Error('Nie znaleziono pozycji w pliku XLSX. Sprawdź czy to prawidłowy eksport z Symfonii FK.');
+    
+    // Jeśli user wybrał auto, wymuszenie użycia detected type
+    const userType = document.getElementById('regType').value;
+    if(userType === 'auto' && register.typRejestru) {
+      document.getElementById('regType').value = register.typRejestru;
+    }
+
+    setMsg('<div class="msg-info"><div class="spinner"></div>Parsowanie plików JPK_FA (XML)...</div>');
+    const jpkNested=await Promise.all(xmlFiles.map(async f=>parseJpkFaXml(await readTxt(f),f.name)));
+    const jpkDocs=jpkNested.flat();
+
+    setMsg('<div class="msg-info"><div class="spinner"></div>Porównuję dokumenty...</div>');
     const results=compare(register.entries,jpkDocs,typRejestru);
 
     setMsg('');
