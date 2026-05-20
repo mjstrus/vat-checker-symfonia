@@ -490,7 +490,11 @@ function compare(symEntries, jpkDocs){
       issues.push(`Data dokumentu: Symfonia ${match.dataSprz || match.dataDok} ≠ JPK ${jpk.dataWyst}`);
 
     // NIP — dopasuj właściwy w zależności od typu rejestru
-    const jpkNipKontrahenta = jpk.nipNabywcy || jpk.nipSprzed;
+    // Dla rejestru ZAKUPU: kontrahent = sprzedawca (P_4B)
+    // Dla rejestru SPRZEDAŻY: kontrahent = nabywca (P_5B)
+    const jpkNipKontrahenta = typRejestru === 'sprzedaz' 
+      ? (jpk.nipNabywcy || jpk.nipSprzed)
+      : (jpk.nipSprzed || jpk.nipNabywcy);
     if(match.nip && jpkNipKontrahenta && norm(match.nip)!==norm(jpkNipKontrahenta))
       issues.push(`NIP kontrahenta: Symfonia ${match.nip} ≠ JPK ${jpkNipKontrahenta}`);
 
