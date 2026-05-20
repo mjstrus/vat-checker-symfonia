@@ -484,7 +484,24 @@ function compare(symEntries, jpkDocs){
       issues.push(`Brutto: Symfonia ${fmtRaw(match.brutto)} ≠ JPK ${fmtRaw(jpk.brutto)}`);
 
     // Daty — użyj dataSprz zamiast dataDok
-    const normD = s => { if(!s) return null; const m=String(s).match(/^(\d{2})\.(\d{2})\.(\d{4})$/); return m?`${m[3]}-${m[2]}-${m[1]}`:String(s).substring(0,10); };
+    const normD = s => {
+      if(!s) return null;
+      const str = String(s).trim();
+      // YYYY-MM-DD — już normalne
+      if(str.match(/^\d{4}-\d{2}-\d{2}/)) return str.substring(0,10);
+      // DD.MM.YYYY
+      const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+      if(m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
+      // M/D/YY lub MM/DD/YYYY (XLSX.js format)
+      const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if(m2) {
+        const mo = m2[1].padStart(2,'0');
+        const d = m2[2].padStart(2,'0');
+        const y = m2[3].length === 2 ? '20' + m2[3] : m2[3];
+        return `${y}-${mo}-${d}`;
+      }
+      return str.substring(0,10);
+    };
     const symData = normD(match.dataSprz || match.dataDok);
     const jpkData = normD(jpk.dataSprz || jpk.dataWyst);  // Preferuj P_6 dla sprzedaży
     if(symData && jpkData && symData!==jpkData)
