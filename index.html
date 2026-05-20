@@ -502,8 +502,12 @@ function compare(symEntries, jpkDocs){
       }
       return str.substring(0,10);
     };
+    // Dla rejestru ZAKUPU: porównaj datę dokumentu (P_1)
+    // Dla rejestru SPRZEDAŻY: porównaj datę sprzedaży (P_6)
     const symData = normD(match.dataSprz || match.dataDok);
-    const jpkData = normD(jpk.dataSprz || jpk.dataWyst);  // Preferuj P_6 dla sprzedaży
+    const jpkData = typRejestru === 'sprzedaz'
+      ? normD(jpk.dataSprz || jpk.dataWyst)
+      : normD(jpk.dataWyst || jpk.dataSprz);
     if(symData && jpkData && symData!==jpkData)
       issues.push(`Data dokumentu: Symfonia ${match.dataSprz || match.dataDok} ≠ JPK ${jpk.dataWyst}`);
 
