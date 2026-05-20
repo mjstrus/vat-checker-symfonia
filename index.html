@@ -341,9 +341,13 @@ function parseSymfoniaXlsx(arrayBuffer){
 
   for(let i=1; i<rows.length; i++){
     const r = rows[i];
-    if(!r || !r[11]) continue; // pomiń puste wiersze
+    if(!r || !r[11]) continue; // pomiń tylko całkowicie puste wiersze
+    // Ale czytaj wszystkie wiersze które mają numer dokumentu (r[11])
 
-    const nrDok   = r[11] ? String(r[11]).trim() : null;
+    let nrDok   = r[11] ? String(r[11]).trim() : null;
+    // Fallback: jeśli r[11] puste, spróbuj r[9] (nr ewidencyjny)
+    if(!nrDok && r[9]) nrDok = String(r[9]).trim();
+    if(!nrDok) continue;  // Teraz pomijaj tylko gdy nie ma żadnego numeru
     const nrEwid  = r[9]  ? String(r[9]).trim()  : null;
     const skrot   = r[10] ? String(r[10]).trim()  : null;
     const dataDok = toDateStr(r[5]);  // Data dokumentu (wysłania do KSeF)
